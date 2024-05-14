@@ -2,6 +2,7 @@ import random
 import re
 import time
 import googlesearch
+import concurrent.futures
 from decouple import config
 import requests
 from bs4 import BeautifulSoup
@@ -47,37 +48,49 @@ def analyze_trials(filename):
 def ask_question():
     q =  input("What would you like to know?\n")
 
-    profiles = load_profiles()
+    profiles = load_profiles(savefile)
 
     property_name = ask_ai(f"How would you call the property of an object that contains the answer to the question: {q.replace('?','')}? Only provide the lower case snake_case_name of the property and nothing else.")
     property_type = ask_ai(f"Given this question: '{q.replace('?','')}', what is the data type of the answer? Please provide the data type in lower case and nothing else. Choose from the following options: integer, string, float, boolean, list, dictionary.")
     print(f"{property_name} ({property_type}):")
-    if not property_name and property_name not in next(iter(profiles.values())).keys():
+    if not property_name or property_name in next(iter(profiles.values())).keys():
         return False
     
-    for key in profiles.keys():
-        profile = profiles[key]
-        if not profile.get("questions", False):
-            profile["questions"] = []
-        
-        profile["questions"].append((q.replace('?',''), property_name, property_type))
-        if property_type == "integer":
-            instruction = "Please provide an integer value as the answer and nothing else."
-        elif property_type == "string":
-            instruction = ""
-        elif property_type == "float":
-            instruction = "Please provide a float value as the answer and nothing else."
-        elif property_type == "boolean":
-            instruction = "Please provide a boolean value (True or False) as the answer and nothing else"
-        elif property_type == "list":
-            instruction = "Please provide a JSON list as the answer and nothing else."
-        elif property_type == "dictionary":
-            instruction = "Please provide a JSON dictionary value as the answer and nothing else."
-        else:
-            instruction = ""
+    if property_type == "integer":
+        instruction = "Please provide an integer value as the answer and nothing else."
+    elif property_type == "string":
+        instruction = ""
+    elif property_type == "float":
+        instruction = "Please provide a float value as the answer and nothing else."
+    elif property_type == "boolean":
+        instruction = "Please provide a boolean value (True or False) as the answer and nothing else"
+    elif property_type == "list":
+        instruction = "Please provide a JSON list as the answer and nothing else."
+    elif property_type == "dictionary":
+        instruction = "Please provide a JSON dictionary value as the answer and nothing else."
+    else:
+        instruction = ""
 
-        answer = ask_ai(f"I would like to know something about an organization called {key}. Please give a conscise answer to question: {q.replace('?','')}? {instruction}")
-        if answer:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        executor.map(
+            ask_an_organization,
+            profiles.keys(),
+            [q]*len(profiles),
+            [instruction]*len(profiles),
+            [property_name]*len(profiles),
+            [property_type]*len(profiles))
+    
+
+def ask_an_organization(organization_name, q, instruction, property_name, property_type):
+    profile = load_profile(savefile, organization_name)
+    if not profile.get("questions", False):
+        profile["questions"] = []
+    
+    profile["questions"].append((q.replace('?',''), property_name, property_type))
+
+    answer = ask_ai(f"I would like to know something about an organization called {organization_name}. Please give a conscise answer to question: {q.replace('?','')}? {instruction}")
+    if answer:
+        try:
             if property_type == "integer":
                 profile[property_name] = int(answer)
             elif property_type == "string":
@@ -92,11 +105,62 @@ def ask_question():
                 profile[property_name] = json.loads(answer)
             else:
                 profile[property_name] = answer
-            profiles[key] = profile
-            print(f"{key} - {answer}")
+        except ValueError:
+            profile[property_name] = None
+        
+        print(f"{organization_name}: {profile[property_name]}")
 
-            with open(savefile, "w") as file:
-                json.dump(profiles, file, indent=4)
+        save_profile(savefile, organization_name, profile)
+
+
+def finish_question():
+    profiles = load_profiles(savefile)
+    all_questions = []
+    for organization_name, profile in profiles.items():
+        if not profile.get("questions", False):
+            continue
+        all_questions += profile["questions"]
+    
+    unique_qs = list(set([q[0] for q in all_questions]))
+    unique_questions = []
+    for q in unique_qs:
+        for question in all_questions:
+            if question[0] == q:
+                unique_questions.append(question)
+
+    unanswered_questions = []
+    for question in unique_questions:
+        for organization_name, profile in profiles.items():
+            if question not in unanswered_questions and question not in profile["questions"]:
+                unanswered_questions.append(question)
+                break
+    choice = choice_menu([q[0] for q in unanswered_questions], "Which question would you like to complete?")
+    if choice is not False:
+        question, property_name, property_type = unanswered_questions[choice]    
+        if property_type == "integer":
+            instruction = "Please provide an integer value as the answer and nothing else."
+        elif property_type == "string":
+            instruction = ""
+        elif property_type == "float":
+            instruction = "Please provide a float value as the answer and nothing else."
+        elif property_type == "boolean":
+            instruction = "Please provide a boolean value (True or False) as the answer and nothing else"
+        elif property_type == "list":
+            instruction = "Please provide a JSON list as the answer and nothing else."
+        elif property_type == "dictionary":
+            instruction = "Please provide a JSON dictionary value as the answer and nothing else."
+        else:
+            instruction = ""
+        params = []
+        for organization_name, profile in profiles.items():
+            if question not in [q[0] for q in profile["questions"]]:
+                params.append((organization_name, question, instruction, property_name, property_type))
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(
+                ask_an_organization,
+                *[[p[i] for p in params] for i in range(len(params[0]))])
+
 
 
 def compile_profile(organization_name):
@@ -163,6 +227,8 @@ while choice is not False:
     if choice is not False:
         if choices[choice] == "Ask a question":
             ask_question()
+        if choices[choice] == "Complete data on already asked question":
+            finish_question()
         elif choices[choice] == "Update profiles (from players.txt)":
             analyze_organizations("players.txt")
         elif choices[choice] == "Parse clinical trials data":
