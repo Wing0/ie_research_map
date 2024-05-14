@@ -1,26 +1,24 @@
-import os
 import random
+import re
 import time
 import googlesearch
-import replicate
 from decouple import config
 import requests
 from bs4 import BeautifulSoup
-from utils import choice_menu
+from apis import latest_trials_data_by_organization
+from utils import choice_menu, load_profile, load_profiles, save_profile, say
 import json
-import tiktoken
-import concurrent.futures
-from gemini_api import query_gemini
+from apis import ask_ai, query_gemini, trucate_to_tokens
 
-DEBUG = False
+savefile = "profiles_gemini.json"
 
 
 def analyze_organization(organization_name):
-    try:
-        profile = compile_profile(organization_name)
-        print(f'{profile["relevance"]}/10 - {organization_name}: {profile["shortly"]}')
-    except replicate.exceptions.ModelError as e:
-        print("Could not analyze organization", organization_name, "due to the following error:", e)
+    # try:
+    profile = compile_profile(organization_name)
+    print(f'{profile["relevance"]}/10 - {organization_name}: {profile["shortly"]}')
+    # except replicate.exceptions.ModelError as e:
+    #     print("Could not analyze organization", organization_name, "due to the following error:", e)
 
 def analyze_organizations(filename):
     with open(filename, "r") as file:
@@ -34,17 +32,22 @@ def analyze_organizations(filename):
     for organization_name in organization_names:
         analyze_organization(organization_name)
 
+def analyze_trials(filename):
+    with open(filename, "r") as file:       
+        lines = file.readlines()
+    
+    organization_names = [line.strip() for line in lines]
+
+    for organization_name in organization_names:
+        profile = load_profile(savefile, organization_name)
+        if profile:
+            new_profile = latest_trials_data_by_organization(profile)
+            save_profile(savefile, organization_name, new_profile)
+
 def ask_question():
     q =  input("What would you like to know?\n")
 
-    # Check if the profiles.json file exists
-    if not os.path.exists("profiles_gemini.json"):
-        # Create an empty dictionary to store profiles
-        profiles = {}
-    else:
-        # Load existing profiles from the profiles.json file
-        with open("profiles_gemini.json", "r") as file:
-            profiles = json.load(file)
+    profiles = load_profiles()
 
     property_name = ask_ai(f"How would you call the property of an object that contains the answer to the question: {q.replace('?','')}? Only provide the lower case snake_case_name of the property and nothing else.")
     property_type = ask_ai(f"Given this question: '{q.replace('?','')}', what is the data type of the answer? Please provide the data type in lower case and nothing else. Choose from the following options: integer, string, float, boolean, list, dictionary.")
@@ -92,70 +95,18 @@ def ask_question():
             profiles[key] = profile
             print(f"{key} - {answer}")
 
-            with open("profiles_gemini.json", "w") as file:
+            with open(savefile, "w") as file:
                 json.dump(profiles, file, indent=4)
 
 
-def say(*args):
-    if DEBUG:
-        print(*args)
-    else:
-        pass
-
-def ask_ai(content, system_prompt="You're a helpful assistant.", gemini=True):
-    say("Asking AI:", content[:80] + "...")
-    if gemini:
-        gemini_response = query_gemini(content)
-        # print(gemini_response)
-        if gemini_response:
-            return gemini_response
-    os.environ["REPLICATE_API_TOKEN"] = config('REPLICATE_API_KEY')
-    prompt = {
-        "top_p": 0.95,
-        "prompt": content,
-        "system_prompt": system_prompt,
-        "temperature": 0.7,
-        "prompt_template": "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{prompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
-        "presence_penalty": 0,
-        "max_tokens": 2048,
-    }
-
-    # result = replicate.models.predictions.create(
-    #     model="meta/meta-llama-3-8b-instruct",
-    #     input=prompt
-    # )
-    # while replicate.predictions.get(result.id).status in ["starting", "processing", "running"]:
-    #     time.sleep(0.5)
-    # print("".join(replicate.predictions.get(result.id).output))
-
-    output = replicate.run(
-        "meta/meta-llama-3-70b-instruct",
-        input=prompt
-    )
-
-    return "".join(output)
-
-
 def compile_profile(organization_name):
-    # Check if the profiles.json file exists
-    if not os.path.exists("profiles_gemini.json"):
-        # Create an empty dictionary to store profiles
-        profiles = {}
-    else:
-        # Load existing profiles from the profiles.json file
-        with open("profiles_gemini.json", "r") as file:
-            profiles = json.load(file)
-
-    # Check if the organization profile already exists
-    if organization_name in profiles:
-        # Profile already exists, do nothing
-        profile = profiles[organization_name]
-    else:
+    profile = load_profile(savefile, organization_name)
+    if not profile:
         # Create a new profile for the organization
-        print("\tAnalyzing organization", organization_name)
+        print("\tAnalyzing organization:", organization_name, "...")
         profile = {
             "organization_name": organization_name,
-            "ai_summary": ask_ai(f"Please write a profile on an organization called {organization_name} and summarize its current operations and goals.")
+            "ai_summary": ask_ai(f"Please write a profile on an organization called {organization_name} and summarize its current operations and goals. Please only write the profile and no meta information (e.g. <here's the overview>)")
         }
         say("Organization shortly")
         profile["shortly"] = ask_ai(f"Please write a short summary (without meta information, e.g. here's a short summary) of the organization {organization_name} in one sentence based on this longer description:\n{profile['ai_summary']}")
@@ -192,44 +143,30 @@ def compile_profile(organization_name):
                 visible_text = soup.get_text()
                 search_text += visible_text + "\n"
 
-        say("Seach text complete")
-        search_text = trucate_to_tokens(search_text) # not necessary for gemini
-        profile["summary"] = ask_ai(f"Please summarize the information about {organization_name} extracted from various websites below. Please only write the overview and no meta information (e.g. <here's the overview>):\n{search_text}")
+        search_text = re.sub(r"\n+", "\n", search_text)
+        search_text = re.sub(r"\s+", " ", search_text)
+
+        say("Search text complete")
+        profile["search_text"] = search_text
+        profile["summary"] = ask_ai(f"Please summarize the information about {organization_name} extracted from various websites below and write a profile about the organization. Please only write the overview and no meta information (e.g. <here's the overview>):\n{search_text}")
         profile["relevance"] = ask_ai(f"Please give an integer score between 0 and 10 for the relevance of {organization_name} in improving the health of children and adolescents in developing countries. Only provide the integer score and nothing else.")
 
-
-        profiles[organization_name] = profile
-
-        # Save the updated profiles to the profiles.json file
-        with open("profiles_gemini.json", "w") as file:
-            json.dump(profiles, file, indent=4)
+        save_profile(savefile, organization_name, profile)
 
     return profile
 
 
-def count_tokens(string: str, encoding_name="cl100k_base") -> int:
-    """Returns the number of tokens in a text string."""
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
-
-
-def trucate_to_tokens(prompt, max_tokens=8096):
-    tokens = count_tokens(prompt)
-    while tokens > max_tokens:
-        prompt = " ".join(prompt.split(" ")[:int(max_tokens/tokens*len(prompt.split(" ")))-5])
-        tokens = count_tokens(prompt)
-    return prompt
-
-# ask_ai("Write a JSON list of the 10 most common health challenges for children and adolescents in the low and middle income countries? Respond with valid JSON only: list of dictionaries with keys: rank, health_challenge.")
-# analyze_organizations("players.txt")
 choice = True
 while choice is not False:
-    choices = ["Ask a question"]
+    choices = ["Ask a question", "Complete data on already asked question", "Update profiles (from players.txt)", "Parse clinical trials data"]
     choice = choice_menu(choices, "What would you like to do?")
     if choice is not False:
         if choices[choice] == "Ask a question":
             ask_question()
+        elif choices[choice] == "Update profiles (from players.txt)":
+            analyze_organizations("players.txt")
+        elif choices[choice] == "Parse clinical trials data":
+            analyze_trials("players.txt")
     else:
         break
 

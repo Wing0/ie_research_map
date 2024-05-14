@@ -1,6 +1,10 @@
 import json
-import logging
+import os
 import re
+from decouple import config
+import json
+
+DEBUG = False
 
 
 def choice_menu(menu, title):
@@ -21,23 +25,21 @@ def choice_menu(menu, title):
     return False if choice == 'q' else int(choice) - 1
 
 
+def prompt(message, default=None):
+    """
+    Prompt the user with a yes/no question.
 
-def ask_openai_api(system, content, ai_client, model='gpt-4-turbo-preview'):
-    messages = [
-        {
-            "role": "system",
-            "content": system
-        },
-        {
-            "role": "user",
-            "content": content
-        },
-    ]
-    response = _query_openai_api(messages, ai_client, model)
-    if response:
-        return response.choices[0].message.content
-    else:
-        return None
+    :param message: str, the message to display
+    :param default: bool, the default value if the user presses Enter
+    :return: bool, the user's response
+    """
+    alternatives = ['N', 'n', 'y', 'Y', '0', '1']
+    info = '\n[Y/n]: ' if default else '\n[y/N]: ' if default is False else '\n[y/n]: '
+    choice = input(message + info).strip()
+    while choice not in alternatives + ['']:
+        print('Incorrect input. Please try again.')
+        choice = input(message + info).strip()
+    return {'N': False, 'n': False, 'y': True, 'Y': True, '0': False, '1': True}.get(choice, default)
 
 
 def clean_string(input_string):
@@ -57,6 +59,74 @@ def cost_report():
     out = f"The current run has costed {round(data['current_run_cost'], 2)}$ so far while the project costs are {round(data['total_cost'], 2)}$ in total."
     print(out)
     return out
+
+def load_profile(savefile, organization_name):
+    """
+    Load the organization profile from the savefile file.
+
+    :param savefile: str, the path to the savefile file
+    :param organization_name: str, the name of the organization
+    :return: dict, the organization profile
+    """
+    # Check if the savefile file exists
+    if not os.path.exists(savefile):
+        # Create an empty dictionary to store profiles
+        profiles = {}
+    else:
+        # Load existing profiles from the savefile file
+        with open(savefile, "r") as file:
+            profiles = json.load(file)
+
+    # Check if the organization profile already exists
+    if organization_name in profiles:
+        # Profile already exists, do nothing
+        profile = profiles[organization_name]
+        return profile
+    
+    return False
+
+def load_profiles(savefile):
+    """
+    Load the organization profiles from the savefile file.
+
+    :param savefile: str, the path to the savefile file
+    :return: dict, the organization profile
+    """
+    # Check if the savefile file exists
+    if not os.path.exists(savefile):
+        # Create an empty dictionary to store profiles
+        profiles = {}
+    else:
+        # Load existing profiles from the savefile file
+        with open(savefile, "r") as file:
+            profiles = json.load(file)
+        
+    return profiles
+
+def save_profile(savefile, organization_name, profile):
+    """
+    Save the organization profile to the savefile file.
+
+    :param savefile: str, the path to the savefile file
+    :param organization_name: str, the name of the organization
+    :param profile: dict, the organization profile
+    """
+    # Load existing profiles from the savefile file
+    with open(savefile, "r") as file:
+        profiles = json.load(file)
+
+    # Save the organization profile to the profiles dictionary
+    profiles[organization_name] = profile
+
+    # Save the profiles dictionary to the savefile file
+    with open(savefile, "w") as file:
+        json.dump(profiles, file, indent=4)
+
+def say(*args):
+    if DEBUG:
+        print(*args)
+    else:
+        pass
 
 def start_run():
     with open(f'run_details.json', 'a') as _:
@@ -116,29 +186,3 @@ def _update_tokens(usage, model):
     with open(f'run_details.json', 'w') as file:
         json.dump(data, file)
 
-
-def _query_openai_api(messages, ai_client, model='gpt-4-turbo-preview'):
-    """
-    This function sends a query to the OpenAI API.
-    It takes a list of messages as input.
-    Each message is a dictionary with a 'role' (either 'system' or 'user') and 'content' (the content of the message).
-    The function returns the response from the OpenAI API.
-    """
-    try:
-        logger.debug("Sending a request to OpenAI API...")
-        response = ai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.6,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0
-        )
-        logger.debug(response)
-        _update_tokens(response.usage, model)
-
-        return response
-
-    except Exception as e:
-        logger.error(f"Error querying OpenAI API: {e}")
-        return None
