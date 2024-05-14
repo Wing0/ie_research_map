@@ -6,10 +6,10 @@ import concurrent.futures
 from decouple import config
 import requests
 from bs4 import BeautifulSoup
-from apis import latest_trials_data_by_organization
-from utils import choice_menu, load_profile, load_profiles, save_profile, say
+from utils import choice_menu, load_profile, load_profiles, load_questions, prompt, save_profile, save_question, say
+from trials import latest_trials_data_by_condition, latest_trials_data_by_organization
 import json
-from apis import ask_ai, query_gemini, trucate_to_tokens
+from ai_apis import ask_ai
 
 savefile = "profiles_gemini.json"
 
@@ -33,24 +33,26 @@ def analyze_organizations(filename):
     for organization_name in organization_names:
         analyze_organization(organization_name)
 
-def analyze_trials(filename):
-    with open(filename, "r") as file:       
-        lines = file.readlines()
-    
-    organization_names = [line.strip() for line in lines]
-
-    for organization_name in organization_names:
-        profile = load_profile(savefile, organization_name)
+def analyze_trials():
+    profiles = load_profiles(savefile)
+    for organization_name, profile in profiles.items():
         if profile:
             new_profile = latest_trials_data_by_organization(profile)
             save_profile(savefile, organization_name, new_profile)
 
 def ask_question():
     q =  input("What would you like to know?\n")
-
+    questions = [q[0] for q in load_questions(savefile)]
+    answer = json.loads(ask_ai(f"Is a similar of the candidate question already included in the question list below? Please answer in valid JSON dictionary with a key 'similar_exists' with a boolean value (True if a similar question is found, otherwise False) and 'similar_question' which is the closest question.\nCandidate question:{q}\nQuestion list:{questions}", json_mode=True, model="gpt-3.5-turbo-0125"))
+    if answer["similar_exists"]:
+        print(f"The question has already been asked: {answer["similar_question"]}?\n")
+        return False
+    improved_question = ask_ai(f"Please improve the following question about organizations trying to address child and adolescent health in developing countries to be more specific, understandable and containing the units/format of the expected response: {q.replace('?','')}? Only provide the improved question and nothing else.", model="gpt-4o")
+    if prompt(f"May I reformulate your question to:\n\t{improved_question.replace('?','')}?\n\t(currently: {q.replace('?','')}?", default=True):
+        q = improved_question
     profiles = load_profiles(savefile)
 
-    property_name = ask_ai(f"How would you call the property of an object that contains the answer to the question: {q.replace('?','')}? Only provide the lower case snake_case_name of the property and nothing else.")
+    property_name = "q_" + ask_ai(f"How would you call the property of an object that contains the answer to the question: {q.replace('?','')}? Only provide the lower case snake_case_name of the property and nothing else.")
     property_type = ask_ai(f"Given this question: '{q.replace('?','')}', what is the data type of the answer? Please provide the data type in lower case and nothing else. Choose from the following options: integer, string, float, boolean, list, dictionary.")
     print(f"{property_name} ({property_type}):")
     if not property_name or property_name in next(iter(profiles.values())).keys():
@@ -59,7 +61,7 @@ def ask_question():
     if property_type == "integer":
         instruction = "Please provide an integer value as the answer and nothing else."
     elif property_type == "string":
-        instruction = ""
+        instruction = "Please provide an answer without any additional information (e.g. <here's the answer>)."
     elif property_type == "float":
         instruction = "Please provide a float value as the answer and nothing else."
     elif property_type == "boolean":
@@ -69,7 +71,9 @@ def ask_question():
     elif property_type == "dictionary":
         instruction = "Please provide a JSON dictionary value as the answer and nothing else."
     else:
-        instruction = ""
+        instruction = "Please provide an answer without any additional information (e.g. <here's the answer>)."
+
+    save_question(savefile, (q.replace('?',''), property_name, property_type))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         executor.map(
@@ -83,12 +87,9 @@ def ask_question():
 
 def ask_an_organization(organization_name, q, instruction, property_name, property_type):
     profile = load_profile(savefile, organization_name)
-    if not profile.get("questions", False):
-        profile["questions"] = []
-    
-    profile["questions"].append((q.replace('?',''), property_name, property_type))
-
-    answer = ask_ai(f"I would like to know something about an organization called {organization_name}. Please give a conscise answer to question: {q.replace('?','')}? {instruction}")
+    if q[1] in profile.keys():
+        return None
+    answer = ask_ai(f"I would like to know something about an organization called {organization_name} with context of improving child and adolescent health in developing countries. Please give a conscise answer to question: {q.replace('?','')}? {instruction}")
     if answer:
         try:
             if property_type == "integer":
@@ -219,21 +220,47 @@ def compile_profile(organization_name):
 
     return profile
 
+def gather_trials():
+    data = json.load(open("conditions.json", 'r'))
+    for diesase_type, diseases in data.items():
+        for name, disease in diseases.items():
+            disease["trials"] = latest_trials_data_by_condition(name)
+    
+    with open("conditions.json", 'w') as file:
+        json.dump(data, file, indent=4)
 
-choice = True
-while choice is not False:
-    choices = ["Ask a question", "Complete data on already asked question", "Update profiles (from players.txt)", "Parse clinical trials data"]
-    choice = choice_menu(choices, "What would you like to do?")
-    if choice is not False:
-        if choices[choice] == "Ask a question":
-            ask_question()
-        if choices[choice] == "Complete data on already asked question":
-            finish_question()
-        elif choices[choice] == "Update profiles (from players.txt)":
-            analyze_organizations("players.txt")
-        elif choices[choice] == "Parse clinical trials data":
-            analyze_trials("players.txt")
-    else:
-        break
+
+mode = True
+while mode is not False:
+    menu = ["Investigate organizations", "Investigate conditions"]
+    mode = choice_menu(menu, "Where would you like to focus?")
+    if mode is not False:
+        if menu[mode] == "Investigate organizations":
+            choice = True
+            while choice is not False:
+                choices = ["Ask a question", "Complete data on already asked question", "Update profiles (from players.txt)", "Parse clinical trials data"]
+                choice = choice_menu(choices, "What would you like to do?")
+                if choice is not False:
+                    if choices[choice] == "Ask a question":
+                        ask_question()
+                    elif choices[choice] == "Complete data on already asked question":
+                        finish_question()
+                    elif choices[choice] == "Update profiles (from players.txt)":
+                        analyze_organizations("players.txt")
+                    elif choices[choice] == "Parse clinical trials data":
+                        analyze_trials()
+                else:
+                    break
+        elif menu[mode] == "Investigate conditions":
+            choice = True
+            while choice is not False:
+                choices = ["Find trials for conditions"]
+                choice = choice_menu(choices, "What would you like to do?")
+                if choice is not False:
+                    if choices[choice] == "Find trials for conditions":
+                        gather_trials()
+                else:
+                    break
+
 
 print("Bye!")

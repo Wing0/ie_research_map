@@ -3,6 +3,7 @@ import os
 import re
 from decouple import config
 import json
+import threading
 
 DEBUG = False
 
@@ -75,7 +76,7 @@ def load_profile(savefile, organization_name):
     else:
         # Load existing profiles from the savefile file
         with open(savefile, "r") as file:
-            profiles = json.load(file)
+            profiles = json.load(file)["profiles"]
 
     # Check if the organization profile already exists
     if organization_name in profiles:
@@ -99,9 +100,46 @@ def load_profiles(savefile):
     else:
         # Load existing profiles from the savefile file
         with open(savefile, "r") as file:
-            profiles = json.load(file)
+            profiles = json.load(file)["profiles"]
         
     return profiles
+
+def load_questions(savefile):
+    """
+    Load the questions.
+
+    :param savefile: str, the path to the savefile file
+    :return: dict, the organization profile
+    """
+    # Check if the savefile file exists
+    if not os.path.exists(savefile):
+        # Create an empty dictionary to store profiles
+        questions = []
+    else:
+        # Load existing profiles from the savefile file
+        with open(savefile, "r") as file:
+            questions = json.load(file)["questions"]
+        
+    return questions
+
+def save_question(savefile, question):
+    """
+    Save the question to the savefile file.
+
+    :param savefile: str, the path to the savefile file
+    :param profile: tuple, the question
+    """
+    # Load existing questions from the savefile file
+    with open(savefile, "r") as file:
+        data = json.load(file)
+
+    # Save the question to the questions list
+    if question[0] not in [q[0] for q in data["questions"]]:
+        data["questions"].append(question)
+
+    # Save the data to the savefile file
+    with open(savefile, "w") as file:
+        json.dump(data, file, indent=4)
 
 def save_profile(savefile, organization_name, profile):
     """
@@ -111,16 +149,19 @@ def save_profile(savefile, organization_name, profile):
     :param organization_name: str, the name of the organization
     :param profile: dict, the organization profile
     """
-    # Load existing profiles from the savefile file
-    with open(savefile, "r") as file:
-        profiles = json.load(file)
+    lock = threading.Lock()  # Create a lock object
 
-    # Save the organization profile to the profiles dictionary
-    profiles[organization_name] = profile
+    with lock:
+        # Load existing profiles from the savefile file
+        with open(savefile, "r") as file:
+            data = json.load(file)
 
-    # Save the profiles dictionary to the savefile file
-    with open(savefile, "w") as file:
-        json.dump(profiles, file, indent=4)
+        # Save the organization profile to the profiles dictionary
+        data["profiles"][organization_name] = profile
+
+        # Save the profiles dictionary to the savefile file
+        with open(savefile, "w") as file:
+            json.dump(data, file, indent=4)
 
 def say(*args):
     if DEBUG:
