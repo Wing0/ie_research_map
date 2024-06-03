@@ -5,7 +5,34 @@ from decouple import config
 import json
 import threading
 
+import requests
+
 DEBUG = False
+
+def post_to_slack(message, json_mode=False):
+    url = "https://hooks.slack.com/services/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"
+    if not json_mode:
+        headers = {
+            "Content-Type": "text/plain"
+        }
+        data = {
+            "text": message
+        }
+    else:
+        data = message
+        headers = {
+            "Content-Type": "application/json"
+        }
+
+    response = requests.post(url, json=data, headers=headers)
+    if response.status_code != 200:
+        print(f"Failed to post to Slack: {response.text}")
+        if json_mode:
+            print(json.dumps(message, indent=4))
+        else:
+            print(f"{message}")
+        return False
+    return True
 
 
 def choice_menu(menu, title):
@@ -168,62 +195,3 @@ def say(*args):
         print(*args)
     else:
         pass
-
-def start_run():
-    with open(f'run_details.json', 'a') as _:
-        pass
-
-    try:
-        with open(f'run_details.json', 'r') as file:
-            data = json.load(file)
-    except:
-        data = {}
-
-    data["current_run_cost"] = 0
-
-    with open(f'run_details.json', 'w') as file:
-        json.dump(data, file)
-
-
-def _update_tokens(usage, model):
-
-    try:
-        with open(f'run_details.json', 'r') as file:
-            data = json.load(file)
-    except:
-        print("Please call start_run() if you want get up to date cost analysis.")
-        data = {}
-
-    if "current_run_cost" not in data.keys():
-        data["current_run_cost"] = 0
-    if "total_tokens" in data.keys():
-        data["total_tokens"] += usage.total_tokens
-    else:
-        data["total_tokens"] = usage.total_tokens
-    if "prompt_tokens" in data.keys():
-        data["prompt_tokens"] += usage.prompt_tokens
-    else:
-        data["prompt_tokens"] = usage.prompt_tokens
-    if "completion_tokens" in data.keys():
-        data["completion_tokens"] += usage.completion_tokens
-    else:
-        data["completion_tokens"] = usage.completion_tokens
-
-    if "total_cost" not in data.keys():
-        data["total_cost"] = 0
-    if model == 'gpt-4-turbo-preview':
-        cost_add = usage.prompt_tokens / 1000000 * 10.00 + usage.completion_tokens / 1000000 * 30.00
-        data["total_cost"] += cost_add
-        data["current_run_cost"] += cost_add
-    elif model == 'gpt-4':
-        cost_add = usage.prompt_tokens / 1000000 * 30.00 + usage.completion_tokens / 1000000 * 60.00
-        data["total_cost"] += cost_add
-        data["current_run_cost"] += cost_add
-    else:
-        cost_add = usage.prompt_tokens / 1000000 * 10.00 + usage.completion_tokens / 1000000 * 30.00
-        data["total_cost"] += cost_add
-        data["current_run_cost"] += cost_add
-
-    with open(f'run_details.json', 'w') as file:
-        json.dump(data, file)
-
