@@ -9,8 +9,9 @@ import requests
 
 DEBUG = False
 
+
 def post_to_slack(message, json_mode=False):
-    url = "https://hooks.slack.com/services/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"
+    url = config("SLACK_WEBHOOK_URL")
     if not json_mode:
         headers = {
             "Content-Type": "text/plain"
@@ -35,41 +36,6 @@ def post_to_slack(message, json_mode=False):
     return True
 
 
-def choice_menu(menu, title):
-    """
-    Display a menu of choices and prompt the user to make a selection.
-
-    :param menu: list, the list of options to choose from
-    :param title: str, the title of the menu
-    :return: int|bool, the index of the chosen option or False if cancelled
-    """
-    print(title)
-    for ind, option in enumerate(menu):
-        print(f'{ind + 1}) {option}')
-    print('q) Cancel')
-    choice = input()
-    while choice not in [str(i) for i in range(1, len(menu) + 1)] + ['q']:
-        choice = input('Incorrect input. Try again:\n')
-    return False if choice == 'q' else int(choice) - 1
-
-
-def prompt(message, default=None):
-    """
-    Prompt the user with a yes/no question.
-
-    :param message: str, the message to display
-    :param default: bool, the default value if the user presses Enter
-    :return: bool, the user's response
-    """
-    alternatives = ['N', 'n', 'y', 'Y', '0', '1']
-    info = '\n[Y/n]: ' if default else '\n[y/N]: ' if default is False else '\n[y/n]: '
-    choice = input(message + info).strip()
-    while choice not in alternatives + ['']:
-        print('Incorrect input. Please try again.')
-        choice = input(message + info).strip()
-    return {'N': False, 'n': False, 'y': True, 'Y': True, '0': False, '1': True}.get(choice, default)
-
-
 def clean_string(input_string):
     # Replace whitespace with underscores
     underscore_string = input_string.replace(' ', '_')
@@ -79,14 +45,6 @@ def clean_string(input_string):
     lower_case_string = stripped_string.lower()
     return lower_case_string
 
-
-def cost_report():
-    with open(f'run_details.json', 'r') as file:
-        data = json.load(file)
-
-    out = f"The current run has costed {round(data['current_run_cost'], 2)}$ so far while the project costs are {round(data['total_cost'], 2)}$ in total."
-    print(out)
-    return out
 
 def load_profile(savefile, organization_name):
     """
@@ -113,6 +71,7 @@ def load_profile(savefile, organization_name):
     
     return False
 
+
 def load_profiles(savefile):
     """
     Load the organization profiles from the savefile file.
@@ -130,6 +89,7 @@ def load_profiles(savefile):
             profiles = json.load(file)["profiles"]
         
     return profiles
+
 
 def load_questions(savefile):
     """
@@ -149,6 +109,7 @@ def load_questions(savefile):
         
     return questions
 
+
 def save_question(savefile, question):
     """
     Save the question to the savefile file.
@@ -167,6 +128,7 @@ def save_question(savefile, question):
     # Save the data to the savefile file
     with open(savefile, "w") as file:
         json.dump(data, file, indent=4)
+
 
 def save_profile(savefile, organization_name, profile):
     """
@@ -190,8 +152,84 @@ def save_profile(savefile, organization_name, profile):
         with open(savefile, "w") as file:
             json.dump(data, file, indent=4)
 
+
+
+# === UI TOOLS ===
+
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
 def say(*args):
     if DEBUG:
         print(*args)
     else:
         pass
+
+
+def choice_menu(menu, title):
+    """
+    Display a menu of choices and prompt the user to make a selection.
+
+    :param menu: list, the list of options to choose from
+    :param title: str, the title of the menu
+    :return: int|bool, the index of the chosen option or False if cancelled
+    """
+    print(title)
+    for ind, option in enumerate(menu):
+        print(f'{ind + 1}) {option}')
+    print('q) Cancel')
+    choice = input()
+    while choice not in [str(i) for i in range(1, len(menu) + 1)] + ['q']:
+        choice = input('Incorrect input. Try again:\n')
+    return False if choice == 'q' else int(choice) - 1
+
+
+def toggle(choices, values, title):
+    """
+    Toggle between on and off values for a list of choices with pre-defined values.
+
+    :param choices: list of str, the choice names
+    :param values: list of int, the default choice values (0 or 1)
+    :param title: str, instructions to the user
+    :return: list of int, the updated choice values
+    """
+    valid = [str(i) for i in range(1, len(choices) + 1)]
+    choice = None
+    while choice is None or choice in valid:
+        print(title)
+        for ind, option in enumerate(choices):
+            color = bcolors.OKGREEN if values[ind] else ''
+            symbol = '+' if values[ind] else ' '
+            print(f'{color}{ind + 1}) {symbol} {option}{bcolors.ENDC}')
+        print('Any) Done')
+        choice = input()
+        if choice in valid:
+            values[int(choice) - 1] = int(not values[int(choice) - 1])
+    return values
+
+
+def prompt(message, default=None):
+    """
+    Prompt the user with a yes/no question.
+
+    :param message: str, the message to display
+    :param default: bool, the default value if the user presses Enter
+    :return: bool, the user's response
+    """
+    alternatives = ['N', 'n', 'y', 'Y', '0', '1']
+    info = '\n[Y/n]: ' if default else '\n[y/N]: ' if default is False else '\n[y/n]: '
+    choice = input(message + info).strip()
+    while choice not in alternatives + ['']:
+        print('Incorrect input. Please try again.')
+        choice = input(message + info).strip()
+    return {'N': False, 'n': False, 'y': True, 'Y': True, '0': False, '1': True}.get(choice, default)
+
