@@ -86,8 +86,8 @@ class DynamicAI:
             if llama3_response:
                 return llama3_response
             return ask_ai(content, system_role, 'gpt-4o')
-        elif model == 'gpt-3.5-turbo-0125':
-            openai_response = self.query_openai(content, system_role, 'gpt-3.5-turbo-0125', json_mode)
+        elif model == 'gpt-4o-mini':
+            openai_response = self.query_openai(content, system_role, 'gpt-4o-mini', json_mode)
             if openai_response:
                 return openai_response
             return ask_ai(content, system_role, 'gpt-4o')
@@ -128,7 +128,7 @@ class DynamicAI:
             if tokens < 8000 and not json_mode:
                 model = 'llama3'
             elif tokens < 15500:
-                model = 'gpt-3.5-turbo-0125'
+                model = 'gpt-4o-mini'
             elif tokens < 30000:
                 model = 'gpt-4o'
             else:
@@ -163,7 +163,7 @@ class DynamicAI:
         
         response = self.query_openai(
             prompt,
-            "Please estimate the difficulty and complexity grade of the following prompt. If the prompt is too long, you will only receive the beginning. Only provide a JSON string with the following keys: 'difficulty' enumerating options (easy, moderate, hard)", model='gpt-3.5-turbo-0125', json_mode=True)
+            "Please estimate the difficulty and complexity grade of the following prompt. If the prompt is too long, you will only receive the beginning. Only provide a JSON string with the following keys: 'difficulty' enumerating options (easy, moderate, hard)", model='gpt-4o-mini', json_mode=True)
         try:
             response = json.loads(response)
         except:
