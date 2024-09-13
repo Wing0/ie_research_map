@@ -262,7 +262,7 @@ def describe_study(study, print_it=True, add_title=True):
         description += f" ({study['protocolSection']['statusModule']['lastUpdateSubmitDate']})"
 
     study_description = study["protocolSection"]["descriptionModule"]["detailedDescription"] if "detailedDescription" in study["protocolSection"]["descriptionModule"] else study["protocolSection"]["descriptionModule"]["briefSummary"]
-    summary = ask_ai("Please summarize the following clinical trials description in up to three bullet points. Start each point with '<bullet>', which will later be replaced with the correct symbol. Only provide the bullets and nothing else (e.g. here's the summary). Text:\n" + study_description)
+    summary = ask_ai("Please summarize the following clinical trials description in up to three bullet points. Start each point with '<bullet>', which will later be replaced with the correct symbol. Only provide the bullets and nothing else (e.g. here's the summary). Text:\n" + study_description, always_shorten=True)
     summary = summary.replace("\n", "").replace("<bullet> ", "\n• ")
 
     description += summary if add_title else summary[1:]

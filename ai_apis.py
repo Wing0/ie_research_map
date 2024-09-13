@@ -13,9 +13,9 @@ from openai import OpenAI
 import os
 import logging
 
+latest_gpt_model = "gpt-4o"
 
-
-def ask_ai(content, system_role=None, model="", json_mode=False):
+def ask_ai(content, system_role=None, model="", json_mode=False, always_shorten=None):
     """
     Sends a quick query to an AI model and returns the response. Uses the DynamicAI class under the hood.
 
@@ -34,7 +34,7 @@ def ask_ai(content, system_role=None, model="", json_mode=False):
     """
 
     client = DynamicAI(tracked=False)
-    return client.ask(content, system_role, model, json_mode)
+    return client.ask(content, system_role, model, json_mode, always_shorten)
 
 
 class DynamicAI:
@@ -48,7 +48,7 @@ class DynamicAI:
         if self.tracked:
             self.cost_report()
 
-    def ask(self, content, system_role=None, model="", json_mode=False):
+    def ask(self, content, system_role=None, model="", json_mode=False, always_shorten=None):
         """
         Sends a query to the best fitting AI model and returns the response.
 
@@ -72,7 +72,15 @@ class DynamicAI:
             tokens = self.count_tokens(content)
             difficulty = None
         if tokens > 100000 or (tokens > 10000 and DEBUG):
-            if prompt(f"The prompt length is {tokens} tokens. Would you like to shorten it to 8k tokens?", default=True):
+            shorten = False
+            match always_shorten:
+                case True:
+                    shorten = True
+                case False:
+                    shorten = False
+                case None:
+                    shorten = prompt(f"The prompt length is {tokens} tokens. Would you like to shorten it to 8k tokens?", default=True)
+            if shorten:
                 content = self.truncate_to_tokens(content, 8000)
                 tokens = self.count_tokens(content)
         say(f"Asking {model}: {content[:150]}... [{tokens} tokens, {difficulty}]")
@@ -80,17 +88,17 @@ class DynamicAI:
             gemini_response = self.query_gemini(content, system_role, json_mode)
             if gemini_response:
                 return gemini_response
-            return ask_ai(content, system_role, 'gpt-4o')
+            return ask_ai(content, system_role, 'gpt-4o', json_mode, always_shorten)
         elif model == 'llama3':
             llama3_response = self.query_llama3(content, system_role)
             if llama3_response:
                 return llama3_response
-            return ask_ai(content, system_role, 'gpt-4o')
+            return ask_ai(content, system_role, 'gpt-4o', json_mode, always_shorten)
         elif model == 'gpt-4o-mini':
             openai_response = self.query_openai(content, system_role, 'gpt-4o-mini', json_mode)
             if openai_response:
                 return openai_response
-            return ask_ai(content, system_role, 'gpt-4o')
+            return ask_ai(content, system_role, 'gpt-4o', json_mode, always_shorten)
         elif model == 'gpt-4o':
             openai_response = self.query_openai(content, system_role, 'gpt-4o', json_mode)
             if openai_response:
@@ -130,19 +138,19 @@ class DynamicAI:
             elif tokens < 15500:
                 model = 'gpt-4o-mini'
             elif tokens < 30000:
-                model = 'gpt-4o'
+                model = latest_gpt_model
             else:
                 model = 'gemini-pro'
         elif difficulty == "moderate":
             if tokens < 8000 and not json_mode:
                 model = 'llama3'
             elif tokens < 30000:
-                model = 'gpt-4o'
+                model = latest_gpt_model
             else:
                 model = 'gemini-pro'
         else:
             if tokens < 30000:
-                model = 'gpt-4o'
+                model = latest_gpt_model
             else:
                 model = 'gemini-pro'
         
